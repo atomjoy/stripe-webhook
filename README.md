@@ -38,7 +38,9 @@ STRIPE_SECRET=sk_test_...
 STRIPE_WEBHOOK_SECRET=whsec_...
 ```
 
-## Konfig
+## Plik z konfiguracją
+
+config/shop.php
 
 ```php
 <?php
