@@ -19,7 +19,8 @@ use Stripe\Webhook;
 use Throwable;
 use UnexpectedValueException;
 
-class StripeWebhookManualController extends Controller
+// Full wypas :D
+class StripeWebhookController extends Controller
 {
     public function handle(Request $request): Response
     {
@@ -37,16 +38,18 @@ class StripeWebhookManualController extends Controller
 
         try {
             match ($event->type) {
-                'checkout.session.completed',
-                'checkout.session.async_payment_succeeded' => $this->handleCompleted($event->data->object),
-                'checkout.session.expired',
-                'checkout.session.async_payment_failed' => $this->handleExpired($event->data->object),
+                // Formularz Checkout (powiązanie sesji z PaymentIntent lub zamówienia 0 zł)
+                'checkout.session.completed' => $this->handleCompleted($event->data->object),
+                'checkout.session.expired' => $this->handleExpired($event->data->object),
+                // Zwroty i spory (chargebacks)
                 'charge.refunded' => $this->handleRefunded($event->data->object),
                 'charge.dispute.created' => $this->handleDispute($event->data->object),
-                // Akceptacja lub odrzucenie płatności
+                // Główny cykl życia płatności (PaymentIntent)
+                'payment_intent.amount_capturable_updated' => $this->handlePaymentIntentManualCapture($event->data->object),
                 'payment_intent.succeeded' => $this->handlePaymentIntentSucceeded($event->data->object),
                 'payment_intent.canceled' => $this->handlePaymentIntentCanceled($event->data->object),
                 'payment_intent.payment_failed' => $this->handlePaymentIntentFailed($event->data->object),
+                // Dla reszty potwierdzasz (nieostotne)
                 default => null,
             };
 
@@ -61,7 +64,7 @@ class StripeWebhookManualController extends Controller
         }
     }
 
-    // Webhook: checkout.session.completed (klient podał kartę, środki zablokowane)
+    // Webhook: checkout.session.completed (klient zakończył formularz Stripe Checkout, zapisuje powiązanie z PaymentIntent)
     private function handleCompleted(object $session): void
     {
         $orderUuid = $this->extractOrderUuid($session);
@@ -77,31 +80,23 @@ class StripeWebhookManualController extends Controller
                 return;
             }
 
-            if (!in_array($order->payment_status, [PaymentStatus::PENDING, PaymentStatus::FAILED], true)) {
-                return;
-            }
-
-            // 1. Płatność pobrana od razu (bez manual capture)
-            if ($session->payment_status === 'paid') {
+            // Wyjątek: zamówienie darmowe (np. kod rabatowy 100%, brak PaymentIntent)
+            if ($session->payment_status === 'no_payment_required' && in_array($order->payment_status, [PaymentStatus::PENDING, PaymentStatus::FAILED], true)) {
                 $order->update([
                     'payment_status' => PaymentStatus::PAID,
-                    'payment_intent_id' => $session->payment_intent ?? null,
                     'payment_error' => null,
                     'paid_at' => now(),
                 ]);
 
-                DB::afterCommit(function () use ($order) {
-                    Mail::to($order->customer_email)->send(new OrderPaidMail($order));
-                });
+                DB::afterCommit(fn() => Mail::to($order->customer_email)->send(new OrderPaidMail($order)));
 
                 return;
             }
 
-            // 2. Środki tylko zablokowane (manual capture)
-            $order->update([
-                'payment_status' => PaymentStatus::WAITING_FOR_CONFIRMATION,
-                'payment_intent_id' => $session->payment_intent ?? null,
-            ]);
+            // Dla wszystkich płatnych zamówień zapisujemy tylko ID intencji (jeśli jeszcze nie ma)
+            if (!$order->payment_intent_id && $session->payment_intent) {
+                $order->update(['payment_intent_id' => $session->payment_intent]);
+            }
         });
     }
 
@@ -180,6 +175,7 @@ class StripeWebhookManualController extends Controller
 
             if ($charge->amount_refunded === $charge->amount) {
                 $order->update([
+                    'status' => OrderStatus::REFUNDED,
                     'payment_status' => PaymentStatus::REFUNDED,
                     'refunded_at' => now(),
                 ]);
@@ -207,39 +203,11 @@ class StripeWebhookManualController extends Controller
             ->update(['payment_status' => PaymentStatus::DISPUTED]);
     }
 
-    // Webhook: payment_intent.succeeded (wykona się po kliknięciu "Akceptuj")
-    private function handlePaymentIntentSucceeded(object $paymentIntent): void
-    {
-        DB::transaction(function () use ($paymentIntent) {
-            $order = Order::where('payment_intent_id', $paymentIntent->id)->lockForUpdate()->first();
-
-            if (!$order) {
-                return;
-            }
-
-            // Akceptujemy przejście ze statusu (WAITING_FOR_CONFIRMATION lub PENDING jako fallback)
-            if (in_array($order->payment_status, [PaymentStatus::WAITING_FOR_CONFIRMATION, PaymentStatus::PENDING], true)) {
-                $order->update([
-                    'payment_status' => PaymentStatus::PAID,
-                    'payment_error' => null,
-                    'paid_at' => now(),
-                ]);
-
-                DB::afterCommit(function () use ($order) {
-                    Mail::to($order->customer_email)->send(new OrderPaidMail($order));
-                });
-            }
-        });
-    }
-
     // Webhook: payment_intent.canceled (wykona się po Twoim "Odrzuć" lub po 7 dniach bez decyzji)
     private function handlePaymentIntentCanceled(object $paymentIntent): void
     {
         DB::transaction(function () use ($paymentIntent) {
-            $order = Order::with('items.variant')
-                ->where('payment_intent_id', $paymentIntent->id)
-                ->lockForUpdate()
-                ->first();
+            $order = $this->findOrderForPaymentIntent($paymentIntent, ['items.variant']);
 
             if (!$order) {
                 return;
@@ -272,20 +240,34 @@ class StripeWebhookManualController extends Controller
         });
     }
 
+    // Webhook: payment_intent.succeeded Jedyne miejsce ustawiające PAID dla płatnych zamówień (wykona się po kliknięciu "Akceptuj")
+    private function handlePaymentIntentSucceeded(object $paymentIntent): void
+    {
+        DB::transaction(function () use ($paymentIntent) {
+            $order = $this->findOrderForPaymentIntent($paymentIntent);
+
+            if ($order && in_array($order->payment_status, [
+                PaymentStatus::PENDING,
+                PaymentStatus::WAITING_FOR_CONFIRMATION,
+                PaymentStatus::FAILED,
+            ], true)) {
+                $order->update([
+                    'payment_status' => PaymentStatus::PAID,
+                    'payment_intent_id' => $paymentIntent->id,
+                    'payment_error' => null,
+                    'paid_at' => now(),
+                ]);
+
+                DB::afterCommit(fn() => Mail::to($order->customer_email)->send(new OrderPaidMail($order)));
+            }
+        });
+    }
+
     // Webhook: payment_intent.payment_failed (Bląd przy płatności)
     private function handlePaymentIntentFailed(object $paymentIntent): void
     {
-        $orderUuid = $this->extractOrderUuid($paymentIntent);
-
-        if (!$orderUuid) {
-            return;
-        }
-
-        DB::transaction(function () use ($paymentIntent, $orderUuid) {
-            $order = Order::where('payment_intent_id', $paymentIntent->id)
-                ->when($orderUuid, fn($query) => $query->orWhere('uuid', $orderUuid))
-                ->lockForUpdate()
-                ->first();
+        DB::transaction(function () use ($paymentIntent) {
+            $order = $this->findOrderForPaymentIntent($paymentIntent);
 
             if (!$order) {
                 return;
@@ -296,6 +278,26 @@ class StripeWebhookManualController extends Controller
                     'payment_status'    => PaymentStatus::FAILED,
                     'payment_intent_id' => $paymentIntent->id,
                     'payment_error'     => $paymentIntent->last_payment_error->message ?? null,
+                ]);
+            }
+        });
+    }
+
+    // Webhook: payment_intent.amount_capturable_updated Ustawia WAITING_FOR_CONFIRMATION (odpala się TYLKO przy manual capture)
+    private function handlePaymentIntentManualCapture(object $paymentIntent): void
+    {
+        if ($paymentIntent->status !== 'requires_capture' || $paymentIntent->amount_capturable <= 0) {
+            return;
+        }
+
+        DB::transaction(function () use ($paymentIntent) {
+            $order = $this->findOrderForPaymentIntent($paymentIntent);
+
+            if ($order && in_array($order->payment_status, [PaymentStatus::PENDING, PaymentStatus::FAILED], true)) {
+                $order->update([
+                    'payment_status' => PaymentStatus::WAITING_FOR_CONFIRMATION,
+                    'payment_intent_id' => $paymentIntent->id,
+                    'payment_error' => null,
                 ]);
             }
         });
@@ -313,6 +315,19 @@ class StripeWebhookManualController extends Controller
         }
 
         return $orderUuid;
+    }
+
+    private function findOrderForPaymentIntent(object $paymentIntent, array $with = []): ?Order
+    {
+        $orderUuid = $this->extractOrderUuid($paymentIntent);
+
+        return Order::with($with)
+            ->where(function ($query) use ($paymentIntent, $orderUuid) {
+                $query->where('payment_intent_id', $paymentIntent->id)
+                    ->when($orderUuid, fn($q) => $q->orWhere('uuid', $orderUuid));
+            })
+            ->lockForUpdate()
+            ->first();
     }
 
     private function logStripeError(string $message, array $context = []): void
