@@ -110,6 +110,10 @@ stripe login
 # Uruchom i nie zamykaj cmd (pobierz klucz i dodaj do .env)
 stripe listen --forward-to http://127.0.0.1:8000/webhooks/stripe --all-snapshot
 
+# Lub te z listy
+stripe listen --forward-to http://127.0.0.1:8000/webhooks/stripe --events checkout.session.completed,checkout.session.expired,payment_intent.amount_capturable_updated,payment_intent.succeeded,payment_intent.payment_failed,payment_intent.canceled,charge.refunded,charge.dispute.created
+
+
 # Skopiuj tymczasowy klucz whsec_... z cmd do pliku .env do STRIPE_WEBHOOK_SECRET
 
 # Uruchon w vscode
