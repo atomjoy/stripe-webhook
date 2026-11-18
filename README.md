@@ -64,6 +64,7 @@ stripe listen --forward-to http://127.0.0.1:8000/webhooks/stripe --all-snapshot
 
 # Uruchon w vscode
 php artisan config:clear
+php artisan serve
 
 # Złóż zamówienie z http://127.0.0.1:8000 przez koszyk z płatnością Stripe i obserwuj statusy na cmd i w aplikacji!
 ```
