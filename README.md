@@ -49,7 +49,7 @@ $middleware->preventRequestForgery(except: [
 ## Local tests Win
 
 Zostaw okno terminala ze stripe listen otwarte. Upewnij się, że w bootstrap/app.php dodałeś
-wyjątek **$middleware->preventRequestForgery(except: ['webhooks/stripe'])** (bez ukośnika na początku),
+wykluczenie dla webhooka z csrf **$middleware->preventRequestForgery(except: ['webhooks/stripe'])** (bez ukośnika na początku),
 inaczej terminal stripe listen pokaże status 419. Instalujesz klienta w **powershell** 
 a uruchamiasz w **cmd** następnie pobierasz tymczasowy klucz z cmd i dodajesz do .env.
 
