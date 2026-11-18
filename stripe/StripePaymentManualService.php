@@ -22,24 +22,44 @@ class StripePaymentManualService
     {
         $order->loadMissing('items');
 
-        // 1. Pozycje koszyka (z uwzględnieniem rabatu z kuponu dla całej linii)
-        $lineItems = $order->items->map(function ($item) {
+        // 1. Pozycje koszyka (główne produkty wraz z podpiętymi pod nie dodatkami)
+        $order->load(['items' => fn($q) => $q->whereNull('parent_id')->with('children')]);
+
+        $formatLineItem = function ($item, bool $isAddon = false) {
+            $prefix = $isAddon ? '+ Dodatek: ' : '';
             $name = $item->quantity > 1
-                ? "{$item->product_name} (× {$item->quantity})"
-                : $item->product_name;
+                ? "{$prefix}{$item->product_name} (× {$item->quantity})"
+                : "{$prefix}{$item->product_name}";
+
+            $attributesText = collect($item->attributes ?? [])
+                ->map(fn($attr) => "{$attr['name']}: {$attr['label']}")
+                ->implode(', ');
+
+            $description = $attributesText
+                ? "{$attributesText} | SKU: {$item->sku}"
+                : "SKU: {$item->sku}";
 
             return [
                 'price_data' => [
                     'currency'     => 'pln',
                     'product_data' => [
                         'name'        => $name,
-                        'description' => "SKU: {$item->sku}",
+                        'description' => $description,
                     ],
                     'unit_amount' => (int) $item->total,
                 ],
                 'quantity' => 1,
             ];
-        })->values()->toArray();
+        };
+
+        $lineItems = [];
+        foreach ($order->items as $mainItem) {
+            $lineItems[] = $formatLineItem($mainItem, isAddon: false);
+
+            foreach ($mainItem->children as $addonItem) {
+                $lineItems[] = $formatLineItem($addonItem, isAddon: true);
+            }
+        }
 
         // 2. Opakowania (jeśli występują)
         if ($order->pack_amount > 0) {
@@ -217,13 +237,30 @@ class StripePaymentManualService
         }
 
         try {
-            $session = Session::retrieve($order->payment_session_id);
+            // Rozwijamy obiekt payment_intent, aby odróżnić blokadę środków od faktycznego pobrania
+            $session = Session::retrieve([
+                'id'     => $order->payment_session_id,
+                'expand' => ['payment_intent'],
+            ]);
 
-            if ($session->payment_status === 'paid') {
+            $paymentIntent = is_object($session->payment_intent) ? $session->payment_intent : null;
+            $piId = $paymentIntent?->id ?? (is_string($session->payment_intent) ? $session->payment_intent : null);
+
+            // 1. Manual capture: środki tylko zablokowane (requires_capture)
+            if ($paymentIntent && $paymentIntent->status === 'requires_capture') {
+                $order->update([
+                    'payment_status'    => PaymentStatus::WAITING_FOR_CONFIRMATION,
+                    'payment_intent_id' => $piId,
+                ]);
+                return;
+            }
+
+            // 2. Standardowa płatność: środki faktycznie pobrane (succeeded)
+            if ($session->payment_status === 'paid' && (!$paymentIntent || $paymentIntent->status === 'succeeded')) {
                 $order->update([
                     'payment_status'    => PaymentStatus::PAID,
                     'paid_at'           => now(),
-                    'payment_intent_id' => $session->payment_intent ?? null,
+                    'payment_intent_id' => $piId,
                 ]);
             }
         } catch (Throwable) {
