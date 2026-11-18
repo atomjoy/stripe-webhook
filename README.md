@@ -1,4 +1,4 @@
-# Stripe
+# Stripe Webhook
 
 Jak dodać webhook do Stripe i testować lokalnie.
 
