@@ -20,7 +20,7 @@ use Throwable;
 use UnexpectedValueException;
 
 // Full wypas :D
-class StripeWebhookController extends Controller
+class StripeWebhookManualController extends Controller
 {
     public function handle(Request $request): Response
     {
