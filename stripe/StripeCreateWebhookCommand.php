@@ -7,7 +7,8 @@ use Illuminate\Support\Facades\File;
 use Stripe\Exception\ApiErrorException;
 use Stripe\StripeClient;
 
-// php artisan stripe:webhook-create --url=https://example.com/webkooks/stripe
+// Zainstaluj: composer require stripe/stripe-php
+// Uruchom: php artisan stripe:webhook-create --url=https://example.com/webkooks/stripe
 class StripeCreateWebhookCommand extends Command
 {
     protected $signature = 'stripe:webhook-create {--url= : Opcjonalny własny adres URL (domyślnie pobiera z APP_URL)}';
