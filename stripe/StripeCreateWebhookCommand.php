@@ -48,6 +48,7 @@ class StripeCreateWebhookCommand extends Command
                 'enabled_events' => [
                     'payment_intent.payment_failed',
                     'payment_intent.succeeded',
+                    'payment_intent.canceled',
                     'payment_intent.requires_action',
                     'checkout.session.completed',
                     'checkout.session.async_payment_succeeded',
