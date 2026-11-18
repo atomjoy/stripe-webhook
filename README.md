@@ -1,11 +1,12 @@
-# Stripe scripts
-Stripe help.
+# Stripe
+
+Jak dodać webhook do Stripe i testować lokalnie.
 
 ## Webhooks
 
 Dodaj webhook: **`https://example.com/webhooks/stripe`** i eventy w panelu. 
 Przełącz na sandbox w pasku wyszukiwania na górze: **Stripe Api** i potem 
-**Developer** do przejścia na webhooks panel.
+**Developer** do przejścia na webhooks panel. 
 
 ```php
 $events = [
@@ -24,9 +25,20 @@ $events = [
 ];
 ```
 
-## Wyłącz ochronę Csrf
+## Pobierz klucz i secrety
 
-Dodaj koniecznie wykluczenie w **bootstrap/app.php**.
+Zapisz wszystko w pliku .env na samym końcu. Klucze sandbox w Stripe mają słowo **_test_** i wtedy wiadomo że to sandbox!
+
+```sh
+# Stripe
+STRIPE_KEY=pk_test_...
+STRIPE_SECRET=sk_test_...
+STRIPE_WEBHOOK_SECRET=whsec_...
+```
+
+## Wyłącz ochronę Csrf w Laravel
+
+Dodaj koniecznie wykluczenie w **bootstrap/app.php** wymagane.
 
 ```php
 $middleware->preventRequestForgery(except: [
@@ -38,19 +50,20 @@ $middleware->preventRequestForgery(except: [
 
 Zostaw okno terminala ze stripe listen otwarte. Upewnij się, że w bootstrap/app.php dodałeś
 wyjątek $middleware->preventRequestForgery(except: ['webhooks/stripe']) (bez ukośnika na początku),
-inaczej terminal stripe listen pokaże status 419.
+inaczej terminal stripe listen pokaże status 419. Instalujesz klienta w **powershell** 
+a uruchamiasz w **cmd** następnie pobierasz tymczasowy klucz z cmd i dodajesz do .env.
 
 ```sh
-# W Powershell
+# W Powershell zainstaluj client Stripe
 winget install Stripe.StripeCli
 
-# Zaloguj w cmd (Naciskasz Enter przekieruje na stronę z logowaniem stripe)
+# Zaloguj w cmd (naciskasz Enter przekieruje na stronę z logowaniem stripe)
 stripe login
 
-# Uruchom i nie zamykaj cmd (pobierz klucz)
+# Uruchom i nie zamykaj cmd (pobierz klucz i dodaj do .env)
 stripe listen --forward-to http://127.0.0.1:8000/webhooks/stripe --all-snapshot
 
-# Skopiuj tymczasowy klucz whsec_... do pliku .env do STRIPE_WEBHOOK_SECRET
+# Skopiuj tymczasowy klucz whsec_... z cmd do pliku .env do STRIPE_WEBHOOK_SECRET
 
 # Uruchon w vscode
 php artisan config:clear
