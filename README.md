@@ -32,9 +32,56 @@ Zapisz wszystko w pliku .env na samym końcu. Klucze sandbox w Stripe mają sło
 
 ```sh
 # Stripe
+STRIPE_MANUAL_CAPTURE=false
 STRIPE_KEY=pk_test_...
 STRIPE_SECRET=sk_test_...
 STRIPE_WEBHOOK_SECRET=whsec_...
+```
+
+## Konfig
+
+```php
+<?php
+
+return [
+	// Waluta
+	'currency' => 'PLN',
+
+	// Minimalna wartość zamówienia w groszach (40,00 zł)
+	'min_order_total' => (int) env('SHOP_MIN_ORDER_TOTAL', 4000),
+
+	// Koszt dostawy 20 PLN
+	'min_shipping_cost' => env('SHOP_MIN_SHIPPING_COST', 2000),
+
+	// Bezpłatna dostawa od kwoty 100 PLN
+	'free_shipping_threshold' => env('SHOP_FREE_SHIPPING_THRESHOLD', 10000),
+
+	// Płatności
+	'stripe' => [
+		'lang' => 'pl',
+		'currency' => 'PLN',
+		'key' => env('STRIPE_KEY'),
+		'secret' => env('STRIPE_SECRET'),
+		'webhook_secret' => env('STRIPE_WEBHOOK_SECRET'),
+		'manual_capture' => env('STRIPE_MANUAL_CAPTURE', false), // Potwierdzanie płatności dla kart
+	],
+
+	// Kurier
+	'inpost' => [
+		'sandbox'         => env('INPOST_SANDBOX', true), // true dla testów, false na produkcję
+		'token'           => env('INPOST_SHIPX_TOKEN'),
+		'organization_id' => env('INPOST_ORGANIZATION_ID'),
+		'geowidget_token' => env('INPOST_GEOWIDGET_TOKEN'),
+	],
+
+	// Dane do faktury proforma
+	'invoice_seller'  => [
+		'name'    => 'Twoja Firma Sp. z o.o.',
+		'address' => 'ul. Przykładowa 12, 00-001 Warszawa',
+		'nip'     => '123-456-78-90',
+		'bank'    => 'PL 12 3456 7890 1234 5678 9012 3456',
+	]
+];
 ```
 
 ## Wyłącz ochronę Csrf w Laravel
