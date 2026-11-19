@@ -19,7 +19,7 @@ use Stripe\Webhook;
 use Throwable;
 use UnexpectedValueException;
 
-// Full wypas :D
+// Dizała nie zmieniaj!
 class StripeWebhookManualController extends Controller
 {
     public function handle(Request $request): Response
@@ -273,7 +273,11 @@ class StripeWebhookManualController extends Controller
                 return;
             }
 
-            if (in_array($order->payment_status, [PaymentStatus::PENDING, PaymentStatus::FAILED], true)) {
+            if (in_array($order->payment_status, [
+                PaymentStatus::PENDING, 
+                PaymentStatus::WAITING_FOR_CONFIRMATION,
+                PaymentStatus::FAILED
+            ], true)) {
                 $order->update([
                     'payment_status'    => PaymentStatus::FAILED,
                     'payment_intent_id' => $paymentIntent->id,
