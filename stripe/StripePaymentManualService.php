@@ -11,7 +11,7 @@ use Stripe\Exception\InvalidRequestException;
 use Stripe\Stripe;
 use Throwable;
 
-class StripePaymentManualService
+class StripePaymentService
 {
     public function __construct()
     {
@@ -136,7 +136,11 @@ class StripePaymentManualService
 
         // Przy manual capture ogranicza metody do kart
         if ($isManualCapture) {
-            $sessionPayload['payment_method_types'] = ['card'];
+            // Od 2026 Stripe API wypluwa error jak to jest (w panelu sie to teraz ustawia)!
+            // $sessionPayload['payment_method_types'] = ['card'];
+
+            // Blokowanie niechcianych form płatności
+            $sessionPayload['excluded_payment_method_types'] = ['klarna'];
         }
 
         $session = Session::create($sessionPayload);
