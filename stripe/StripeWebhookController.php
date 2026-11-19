@@ -19,7 +19,7 @@ use Stripe\Webhook;
 use Throwable;
 use UnexpectedValueException;
 
-// Tylko dla checkout session mode payment
+// Tylko dla checkout.session mode: payment (bez manual_capture)
 class StripeWebhookController extends Controller
 {
     public function handle(Request $request): Response
