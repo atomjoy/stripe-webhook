@@ -19,6 +19,7 @@ use Stripe\Webhook;
 use Throwable;
 use UnexpectedValueException;
 
+// Tylko dla checkout session mode payment
 class StripeWebhookController extends Controller
 {
     public function handle(Request $request): Response
@@ -65,27 +66,7 @@ class StripeWebhookController extends Controller
             return;
         }
 
-        DB::transaction(function () use ($orderUuid, $session) {
-            $order = Order::where('uuid', $orderUuid)->lockForUpdate()->first();
-
-            if (!$order || $order->payment_session_id !== $session->id) {
-                return;
-            }
-
-            if ($order->payment_status === PaymentStatus::PENDING) {
-                $order->update([
-                    'payment_status' => PaymentStatus::PAID,
-                    'status' => $order->status,
-                    'paid_at' => now(),
-                    'payment_intent_id' => $session->payment_intent ?? null,
-                ]);
-
-                DB::afterCommit(function () use ($order) {
-                    // Z kolejkowaniem w klasie koniecznie !!!
-                    Mail::to($order->customer_email)->send(new OrderPaidMail($order));
-                });
-            }
-        });
+        self::markOrderAsPaid($orderUuid, $session);
     }
 
     private function handleExpired(object $session): void
@@ -220,7 +201,7 @@ class StripeWebhookController extends Controller
         return Session::retrieve($event->data->object->id);
     }
 
-    // Aktualizacja statusu z Stripe API
+    // Aktualizacja statusu z Stripe API (np. na stronie Thank You / w pollingu)
     public static function syncPaymentStatus(Order $order): void
     {
         if ($order->payment_status !== PaymentStatus::PENDING || !$order->payment_session_id) {
@@ -232,15 +213,38 @@ class StripeWebhookController extends Controller
 
             $session = Session::retrieve($order->payment_session_id);
 
+            // Odświeża instancję modelu przekazaną przez referencję (np. w kontrolerze widoku)
             if ($session->payment_status === 'paid') {
+                self::markOrderAsPaid($order->uuid, $session);
+                $order->refresh(); 
+            }
+        } catch (Throwable) {
+            // Jeśli chwilowy błąd sieciowy, webhook lub usePoll dokończy aktualizację
+        }
+    }
+
+    // Wspólna, bezpieczna transakcyjnie metoda finalizująca płatność
+    private static function markOrderAsPaid(string $orderUuid, object $session): void
+    {
+        DB::transaction(function () use ($orderUuid, $session) {
+            $order = Order::where('uuid', $orderUuid)->lockForUpdate()->first();
+
+            if (!$order || $order->payment_session_id !== $session->id) {
+                return;
+            }
+
+            if (in_array($order->payment_status, [PaymentStatus::PENDING, PaymentStatus::FAILED], true)) {
                 $order->update([
                     'payment_status'    => PaymentStatus::PAID,
                     'paid_at'           => now(),
                     'payment_intent_id' => $session->payment_intent ?? null,
                 ]);
+
+                DB::afterCommit(function () use ($order) {
+                    // Z kolejkowaniem w klasie koniecznie (implements ShouldQueue)
+                    Mail::to($order->customer_email)->send(new OrderPaidMail($order));
+                });
             }
-        } catch (Throwable) {
-            // Jeśli chwilowy błąd sieciowy, webhook lub usePoll dokończy aktualizację
-        }
+        });
     }
 }
