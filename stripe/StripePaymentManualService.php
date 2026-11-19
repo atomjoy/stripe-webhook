@@ -11,7 +11,8 @@ use Stripe\Exception\InvalidRequestException;
 use Stripe\Stripe;
 use Throwable;
 
-class StripePaymentService
+// Działająca
+class StripePaymentManualService
 {
     public function __construct()
     {
